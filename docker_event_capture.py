@@ -8,13 +8,16 @@ import datetime
 
 DOCKER_CLIENT = None
 CONFIG = None
+SELF_IP = None
 
 def init():
     global DOCKER_CLIENT
     global CONFIG
+    global SELF_IP
     try:
         CONFIG = json.load(open(sys.argv[1]))
         DOCKER_CLIENT = docker.DockerClient(base_url='unix:/' + str(CONFIG["docker"]))
+        SELF_IP = CONFIG["self_ip"]
         for container in (DOCKER_CLIENT.containers.list(filters={"status":"running"})):
             print(container.attrs["Id"])
         
@@ -28,6 +31,7 @@ def init():
         exit(1)
 
 def event_loop():
+    global SELF_IP
     for event in DOCKER_CLIENT.events(decode=True):
         if (event["Type"]=="container"):
             if event["status"] == "start" or event["status"] == "destroy":
@@ -50,18 +54,22 @@ def event_loop():
                     if not PAYLOAD["SERVICE"]:
                         EXT_ATTRS = fetch_container_details(PAYLOAD["CONTAINER_ID"]).attrs
                         for mapsrc,mapdst in EXT_ATTRS["HostConfig"]["PortBindings"].items():
-                            PROTOCOL = "tcp"
+                            print(mapdst)
+                            PROTOCOL = "TCP"
                             if "udp" in mapsrc:
-                                PROTOCOL = "udp"
-                            PAYLOAD["PORT_MAPPING"].append(dict({"PROTOCOL":PROTOCOL,mapdst[0]["HostIp"]:mapdst[0]["HostPort"]}))
+                                PROTOCOL = "UDP"
+                            if mapdst[0]["HostIp"] != "":
+                                IP = mapdst[0]["HostIp"]
+                            else:
+                                IP = SELF_IP
+                            PAYLOAD["PORT_MAPPING"].append(dict({"PROTOCOL":PROTOCOL,IP:mapdst[0]["HostPort"]}))
                     else:
                         # this is a service
                         # get port mapping info from service definition
                         ATTRS = fetch_service_details(PAYLOAD["SERVICE_ID"]).attrs
                         for mapping in ATTRS["Endpoint"]["Spec"]["Ports"]:
-                            PAYLOAD["PORT_MAPPING"].append(dict({"PROTOCOL":str(mapping["Protocol"]),"":mapping["PublishedPort"]}))
-                        
-                    print(json.dumps(PAYLOAD))
+                            PAYLOAD["PORT_MAPPING"].append(dict({"PROTOCOL":str(mapping["Protocol"]),SELF_IP:mapping["PublishedPort"]}))
+                    notify_consul(PAYLOAD)
                 else:
                     PAYLOAD["CMD"] = "deregister"
                     notify_consul(PAYLOAD)
