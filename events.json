@@ -1,0 +1,48 @@
+[
+    {
+        "status": "create",
+        "id": "49a6e3f8180bed1bd4ad9dd5e70206451697464e14c33a5132c022892d55f9d1",
+        "from": "httpd:latest@sha256:79c67705b322b8284080d80fc825275d05ca48c5637a7302d3d92b79127b8df6",
+        "Type": "container",
+        "Action": "create",
+        "Actor": {
+            "ID": "49a6e3f8180bed1bd4ad9dd5e70206451697464e14c33a5132c022892d55f9d1",
+            "Attributes": {
+                "com.docker.swarm.node.id": "kooinny4hrg1p71c8wexqk6ay",
+                "com.docker.swarm.service.id": "rotr8nwv8ak1n2l3zbkw5p5bd",
+                "com.docker.swarm.service.name": "mysvc",
+                "com.docker.swarm.task": "",
+                "com.docker.swarm.task.id": "zo7yljtm3h64819qskg9qx1uu",
+                "com.docker.swarm.task.name": "mysvc.1.zo7yljtm3h64819qskg9qx1uu",
+                "image": "httpd:latest@sha256:79c67705b322b8284080d80fc825275d05ca48c5637a7302d3d92b79127b8df6",
+                "name": "mysvc.1.zo7yljtm3h64819qskg9qx1uu"
+            }
+        },
+        "scope": "local",
+        "time": 1620498831,
+        "timeNano": 1620498831919287000
+    },
+    {
+        "status": "start",
+        "id": "49a6e3f8180bed1bd4ad9dd5e70206451697464e14c33a5132c022892d55f9d1",
+        "from": "httpd:latest@sha256:79c67705b322b8284080d80fc825275d05ca48c5637a7302d3d92b79127b8df6",
+        "Type": "container",
+        "Action": "start",
+        "Actor": {
+            "ID": "49a6e3f8180bed1bd4ad9dd5e70206451697464e14c33a5132c022892d55f9d1",
+            "Attributes": {
+                "com.docker.swarm.node.id": "kooinny4hrg1p71c8wexqk6ay",
+                "com.docker.swarm.service.id": "rotr8nwv8ak1n2l3zbkw5p5bd",
+                "com.docker.swarm.service.name": "mysvc",
+                "com.docker.swarm.task": "",
+                "com.docker.swarm.task.id": "zo7yljtm3h64819qskg9qx1uu",
+                "com.docker.swarm.task.name": "mysvc.1.zo7yljtm3h64819qskg9qx1uu",
+                "image": "httpd:latest@sha256:79c67705b322b8284080d80fc825275d05ca48c5637a7302d3d92b79127b8df6",
+                "name": "mysvc.1.zo7yljtm3h64819qskg9qx1uu"
+            }
+        },
+        "scope": "local",
+        "time": 1620498832,
+        "timeNano": 1620498832534920000
+    }
+]
