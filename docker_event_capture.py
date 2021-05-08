@@ -11,6 +11,7 @@ CONFIG = None
 
 def init():
     global DOCKER_CLIENT
+    global CONFIG
     try:
         CONFIG = json.load(open(sys.argv[1]))
         DOCKER_CLIENT = docker.DockerClient(base_url='unix:/' + str(CONFIG["docker"]))
@@ -34,24 +35,42 @@ def event_loop():
                 PAYLOAD["CONTAINER_ID"] = event["id"]
                 if "Attributes" in event["Actor"]:
                     ATTRS = event["Actor"]["Attributes"]
-                    PAYLOAD["SVC_NAME"] = ATTRS["name"]
+                    PAYLOAD["SERVICE_NAME"] = ATTRS["name"]
                     PAYLOAD["SERVICE"] = False
                     if "com.docker.swarm.service.id" in ATTRS:
                         PAYLOAD["SERVICE"] = True
-                        PAYLOAD["SVC_ID"] = ATTRS["com.docker.swarm.service.id"]
-                        PAYLOAD["SVC_NAME"] = ATTRS["com.docker.swarm.service.name"]
+                        PAYLOAD["SERVICE_ID"] = ATTRS["com.docker.swarm.service.id"]
+                        PAYLOAD["SERVICE_NAME"] = ATTRS["com.docker.swarm.service.name"]
                     PAYLOAD["CONTAINER_NAME"] = ATTRS["name"]
                     PAYLOAD["IMAGE_NAME"] = ATTRS["image"]
                 if event["status"] == "start":
                     PAYLOAD["CMD"] = "register"
+                    # print(json.dumps(PAYLOAD))
+                    PAYLOAD["PORT_MAPPING"] = list()
+                    if not PAYLOAD["SERVICE"]:
+                        EXT_ATTRS = fetch_container_details(PAYLOAD["CONTAINER_ID"]).attrs
+                        for mapsrc,mapdst in EXT_ATTRS["HostConfig"]["PortBindings"].items():
+                            PROTOCOL = "tcp"
+                            if "udp" in mapsrc:
+                                PROTOCOL = "udp"
+                            PAYLOAD["PORT_MAPPING"].append(dict({"PROTOCOL":PROTOCOL,mapdst[0]["HostIp"]:mapdst[0]["HostPort"]}))
+                    else:
+                        # this is a service
+                        # get port mapping info from service definition
+                        ATTRS = fetch_service_details(PAYLOAD["SERVICE_ID"]).attrs
+                        for mapping in ATTRS["Endpoint"]["Spec"]["Ports"]:
+                            PAYLOAD["PORT_MAPPING"].append(dict({"PROTOCOL":str(mapping["Protocol"]),"":mapping["PublishedPort"]}))
+                        
                     print(json.dumps(PAYLOAD))
-                    #print(json.dumps(fetch_container_details(PAYLOAD["CONTAINER_ID"]).attrs))
                 else:
                     PAYLOAD["CMD"] = "deregister"
                     notify_consul(PAYLOAD)
 
 def fetch_container_details(id):
     return DOCKER_CLIENT.containers.get(id)
+
+def fetch_service_details(id):
+    return DOCKER_CLIENT.services.get(service_id=id)
 
 def notify_consul(payload):
     print(json.dumps(payload))
