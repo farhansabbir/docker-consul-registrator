@@ -42,27 +42,27 @@ def event_loop():
                 PAYLOAD["ID"] = event["id"] # container ID
                 PAYLOAD["Address"] = CONFIG["self_ip"]
                 PAYLOAD["Check"] = dict()
-                PAYLOAD["Check"]["DeregisterCriticalServiceAfter"] = "30s"
+                PAYLOAD["Check"]["DeregisterCriticalServiceAfter"] = "15s"
                 PAYLOAD["Check"]["Interval"] = "10s"
-                PAYLOAD["Check"]["Timeout"] = "5s"
+                PAYLOAD["Check"]["Timeout"] = "3s"
                 PAYLOAD["Tags"] = list()
-                PAYLOAD["EnableTagOverride"] = True
+                PAYLOAD["EnableTagOverride"] = False
                 PAYLOAD["Node"] = platform.node()
                 if "Attributes" in event["Actor"]:
                     ATTRS = event["Actor"]["Attributes"]
-                    PAYLOAD["ServiceName"] = ATTRS["name"]
-                    PAYLOAD["SERVICE"] = False
+                    PAYLOAD["Service"] = ATTRS["name"]
+                    PAYLOAD["IsService"] = False
                     if "com.docker.swarm.service.id" in ATTRS:
-                        PAYLOAD["SERVICE"] = True
+                        PAYLOAD["IsService"] = True
                         PAYLOAD["ServiceID"] = ATTRS["com.docker.swarm.service.id"]
-                        PAYLOAD["ServiceName"] = ATTRS["com.docker.swarm.service.name"]
+                        PAYLOAD["Service"] = ATTRS["com.docker.swarm.service.name"]
                     PAYLOAD["CONTAINER_NAME"] = ATTRS["name"]
                     PAYLOAD["Tags"].append(ATTRS["image"])
                     #PAYLOAD["IMAGE_NAME"] = ATTRS["image"]
                 if event["status"] == "start":
                     PAYLOAD["CMD"] = "register"
                     PAYLOAD["PORT_MAPPING"] = list()
-                    if not PAYLOAD["SERVICE"]:
+                    if not PAYLOAD["IsService"]:
                         EXT_ATTRS = fetch_container_details(PAYLOAD["ID"]).attrs
                         for mapsrc,mapdst in EXT_ATTRS["HostConfig"]["PortBindings"].items():
                             PROTOCOL = "TCP"
@@ -101,12 +101,20 @@ def check_consul_connection():
 
 def notify_consul(payload):
     headers = {"Content-type": "application/json"}
+    data = dict()
+    data["Check"] = payload["Check"]
+    data["Tags"] = payload["Tags"]
+    data["Name"] = payload["Service"]
+    data["EnableTagOverride"] = payload["EnableTagOverride"]
     if "PORT_MAPPING" in payload:
         for mapping in payload["PORT_MAPPING"]:
-            payload["ServiceID"] = str(payload["ID"]) + "_" + str(mapping["Port"]) + str(mapping["PROTOCOL"])
-            payload["ServiceAddress"] = mapping["IP"]
-            payload["ServicePort"] = mapping["Port"]
-            print(payload)
+            data["ID"] = payload["ID"] + "_" + str(mapping["PROTOCOL"]) + "_" + str(mapping["Port"])
+            data["Address"] = mapping["IP"]
+            data["Port"] = int(mapping["Port"])
+            data["Check"][mapping["PROTOCOL"]] = str(data["Address"] + ":" + str(data["Port"]))
+            print(json.dumps(data))
+            resp = requests.put(url=CONFIG["consul"] + "/v1/agent/service/" + payload["CMD"],json=data,headers=headers)
+            print(resp.reason)
     #print(json.dumps(payload))
 
 
