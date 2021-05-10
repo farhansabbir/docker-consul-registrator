@@ -42,8 +42,8 @@ def event_loop():
                 PAYLOAD["ID"] = event["id"] # container ID
                 PAYLOAD["Address"] = CONFIG["self_ip"]
                 PAYLOAD["Check"] = dict()
-                PAYLOAD["Check"]["DeregisterCriticalServiceAfter"] = "15s"
-                PAYLOAD["Check"]["Interval"] = "10s"
+                PAYLOAD["Check"]["DeregisterCriticalServiceAfter"] = "5s"
+                PAYLOAD["Check"]["Interval"] = "2s"
                 PAYLOAD["Check"]["Timeout"] = "3s"
                 PAYLOAD["Tags"] = list()
                 PAYLOAD["EnableTagOverride"] = False
@@ -64,12 +64,14 @@ def event_loop():
                     PAYLOAD["PORT_MAPPING"] = list()
                     if not PAYLOAD["IsService"]:
                         EXT_ATTRS = fetch_container_details(PAYLOAD["ID"]).attrs
-                        for mapsrc,mapdst in EXT_ATTRS["HostConfig"]["PortBindings"].items():
+                        print(EXT_ATTRS["NetworkSettings"]["Ports"])
+                        for mapsrc,mapdst in EXT_ATTRS["NetworkSettings"]["Ports"].items():
                             PROTOCOL = "TCP"
                             if "udp" in mapsrc:
                                 PROTOCOL = "UDP"
-                            if mapdst[0]["HostIp"] != "":
+                            if mapdst[0]["HostIp"] != "0.0.0.0":
                                 IP = mapdst[0]["HostIp"]
+                                print(IP)
                             else:
                                 IP = SELF_IP
                             PAYLOAD["PORT_MAPPING"].append(dict({"PROTOCOL":PROTOCOL,"IP":IP,"Port":mapdst[0]["HostPort"]}))
@@ -77,7 +79,7 @@ def event_loop():
                         # this is a service
                         # get port mapping info from service definition
                         ATTRS = fetch_service_details(PAYLOAD["ServiceID"]).attrs
-                        for mapping in ATTRS["Endpoint"]["Spec"]["Ports"]:
+                        for mapping in ATTRS["Endpoint"]["Ports"]:
                             PAYLOAD["PORT_MAPPING"].append(dict({"PROTOCOL":str(mapping["Protocol"]),"IP":SELF_IP,"Port":mapping["PublishedPort"]}))
                     notify_consul(PAYLOAD)
                 else:
