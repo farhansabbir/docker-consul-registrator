@@ -53,6 +53,7 @@ def event_loop():
                     PAYLOAD["Service"] = ATTRS["name"]
                     PAYLOAD["IsService"] = False
                     if "com.docker.swarm.service.id" in ATTRS:
+                        PAYLOAD["ID"] = ATTRS["name"]
                         PAYLOAD["IsService"] = True
                         PAYLOAD["ServiceID"] = ATTRS["com.docker.swarm.service.id"]
                         PAYLOAD["Service"] = ATTRS["com.docker.swarm.service.name"]
@@ -84,6 +85,8 @@ def event_loop():
                     notify_consul(PAYLOAD)
                 else:
                     PAYLOAD["CMD"] = "deregister"
+                    if PAYLOAD["IsService"]:
+                        PAYLOAD["ID"]
                     notify_consul(PAYLOAD)
 
 def fetch_container_details(id):
@@ -102,22 +105,42 @@ def check_consul_connection():
         exit(1)
 
 def notify_consul(payload):
-    headers = {"Content-type": "application/json"}
-    data = dict()
-    data["Check"] = payload["Check"]
-    data["Tags"] = payload["Tags"]
-    data["Name"] = payload["Service"]
-    data["EnableTagOverride"] = payload["EnableTagOverride"]
-    if "PORT_MAPPING" in payload:
-        for mapping in payload["PORT_MAPPING"]:
-            data["ID"] = payload["ID"] + "_" + str(mapping["PROTOCOL"]) + "_" + str(mapping["Port"])
-            data["Address"] = mapping["IP"]
-            data["Port"] = int(mapping["Port"])
-            data["Check"][mapping["PROTOCOL"]] = str(data["Address"] + ":" + str(data["Port"]))
-            print(json.dumps(data))
-            resp = requests.put(url=CONFIG["consul"] + "/v1/agent/service/" + payload["CMD"],json=data,headers=headers)
-            print(resp.reason)
-    #print(json.dumps(payload))
+    if payload["CMD"] == "register":
+        headers = {"Content-type": "application/json"}
+        data = dict()
+        data["Check"] = payload["Check"]
+        data["Tags"] = payload["Tags"]
+        data["Name"] = payload["Service"]
+        data["EnableTagOverride"] = payload["EnableTagOverride"]
+        if "PORT_MAPPING" in payload:
+            for mapping in payload["PORT_MAPPING"]:
+                data["ID"] = payload["ID"] + "_" + str(mapping["PROTOCOL"]) + "_" + str(mapping["Port"])
+                data["Address"] = mapping["IP"]
+                data["Port"] = int(mapping["Port"])
+                data["Check"][mapping["PROTOCOL"]] = str(data["Address"] + ":" + str(data["Port"]))
+                resp = requests.put(url=CONFIG["consul"] + "/v1/agent/service/" + payload["CMD"],json=data,headers=headers)
+                if resp.status_code == 200:
+                    print("Successfully registered service with payload: " + str(payload))
+                else:
+                    print("Unable to register service with payload " + str(data))
+                    print(resp.reason)
+    elif payload["CMD"] == "deregister":
+        headers = {"Content-type": "application/json"}
+        resp = requests.get(url=CONFIG["consul"] + "/v1/agent/services",headers=headers).json()
+        for key in resp.keys():
+            if payload["ID"] in key:
+                resp = requests.put(url=CONFIG["consul"] + "/v1/agent/service/" + payload["CMD"] + "/" + str(key),headers=headers)
+                if resp.status_code == 200:
+                    print("Successfully deregistered service with payload " + str(payload))
+                    break
+        else:
+            print("Unable to properly detect service instance in registered services.")
+
+        # resp = requests.put(url=CONFIG["consul"] + "/v1/agent/service/" + payload["CMD"] + "/" + str(payload["ID"]),headers=headers)
+        # if resp.status_code == 200:
+        #     print("Successfully deregistered service with payload " + str(payload))
+
+
 
 
 
