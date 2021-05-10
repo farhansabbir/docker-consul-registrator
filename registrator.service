@@ -1,0 +1,19 @@
+[Unit]
+Description="Registrator - A service mesh registrator solution for docker and consul"
+Documentation=https://www.consul.io/
+Requires=network-online.target
+After=network-online.target
+ConditionFileNotEmpty=/etc/docker_consul_registrator/config.json
+
+[Service]
+User=root
+Group=root
+ExecStart=/opt/docker_consul_registrator/venv/bin/python3 /opt/docker_consul_registrator/registrator.py /etc/docker_consul_registrator/config.json
+ExecReload=/bin/kill --signal HUP $MAINPID
+KillMode=process
+KillSignal=SIGTERM
+Restart=on-failure
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
