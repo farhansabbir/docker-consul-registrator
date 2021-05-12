@@ -16,13 +16,17 @@ def cleanup():
     for service in my_services.keys():
         if "sidecar-proxy" in service or "ingress-service" in service:
             continue
-        print(service)
+        print(get_Registered_Services_From_Consul(service=service))
+        #print(fetch_container_details(id=my_services["ID"]))
 
 
-def get_Registered_Services_From_Consul():
-    resp = requests.get(CONFIG["consul"] + "/v1/agent/services")
+def get_Registered_Services_From_Consul(service=None):
+    resp = None
+    if not service:
+        resp = requests.get(CONFIG["consul"] + "/v1/agent/services")
+    else:
+        resp = requests.get(CONFIG["consul"] + "/v1/agent/service/"+service)
     return resp.json()
-    
 
 def fetch_container_details(id):
     return DOCKER_CLIENT.containers.get(id)
@@ -72,6 +76,9 @@ def event_loop():
                     PAYLOAD["PORT_MAPPING"] = list()
                     if not PAYLOAD["IsService"]:
                         EXT_ATTRS = fetch_container_details(PAYLOAD["ID"]).attrs
+                        if "sidecar" in EXT_ATTRS["Config"]["Labels"]:
+                            if str(EXT_ATTRS["Config"]["Labels"]["sidecar"]) != "": 
+                                PAYLOAD["sidecar"] = str(EXT_ATTRS["Config"]["Labels"]["sidecar"])
                         if "consul" in EXT_ATTRS["Config"]["Labels"]:
                             if str(EXT_ATTRS["Config"]["Labels"]["consul"]).lower() == "yes":
                                 PAYLOAD["labels"] = EXT_ATTRS["Config"]["Labels"]
@@ -94,6 +101,10 @@ def event_loop():
                         # this is a service
                         # get port mapping info from service definition
                         ATTRS = fetch_service_details(PAYLOAD["ServiceID"]).attrs
+                        if "sidecar" in ATTRS["Spec"]["Labels"]:
+                            if str(ATTRS["Spec"]["Labels"]["sidecar"]) != "":
+                                PAYLOAD["sidecar"] = ATTRS["Spec"]["Labels"]["sidecar"]
+
                         if "consul" in ATTRS["Spec"]["Labels"]:
                             if str(ATTRS["Spec"]["Labels"]["consul"]).lower() == "yes":
                                 PAYLOAD["labels"] = ATTRS["Spec"]["Labels"]
@@ -119,6 +130,10 @@ def notify_consul(payload):
         data["Check"] = payload["Check"]
         data["Tags"] = payload["Tags"]
         data["Name"] = payload["Service"]
+        data["Meta"] = dict()
+        if "labels" in payload:
+            for key,value in payload["labels"].items():
+                data["Meta"][key] = value
         data["EnableTagOverride"] = payload["EnableTagOverride"]
         if "PORT_MAPPING" in payload:
             for mapping in payload["PORT_MAPPING"]:
