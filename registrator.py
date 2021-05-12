@@ -11,27 +11,34 @@ DOCKER_CLIENT = None
 CONFIG = None
 SELF_IP = None
 
-def init():
-    global DOCKER_CLIENT
-    global CONFIG
-    global SELF_IP
-    try:
-        CONFIG = json.load(open(sys.argv[1]))
-        DOCKER_CLIENT = docker.DockerClient(base_url='unix:/' + str(CONFIG["docker"]))
-        SELF_IP = CONFIG["self_ip"]
-        check_consul_connection()
-        for container in (DOCKER_CLIENT.containers.list(filters={"status":"running"})):
-            print(container.attrs["Id"])
-        
-        event_loop()
+def cleanup():
+    my_services = get_Registered_Services_From_Consul()
+    for service in my_services.keys():
+        if "sidecar-proxy" in service or "ingress-service" in service:
+            continue
+        print(service)
 
-    except docker.errors.DockerException as dockererror:
-        print("Unable to connect to docker daemon. Reason: " + str(dockererror))
-        exit(1)
-    except KeyError as err:
-        print("Config parsing error. Key not found in config: " + str(err))
-        exit(1)
+
+def get_Registered_Services_From_Consul():
+    resp = requests.get(CONFIG["consul"] + "/v1/agent/services")
+    return resp.json()
     
+
+def fetch_container_details(id):
+    return DOCKER_CLIENT.containers.get(id)
+
+def fetch_service_details(id):
+    return DOCKER_CLIENT.services.get(service_id=id)
+
+def check_consul_connection():
+    try:
+        if requests.get(CONFIG["consul"],timeout=2).status_code != 200:
+            print("Unable to contact consul service on " + str(CONFIG["consul"]))
+            exit(1)
+    except requests.exceptions.ConnectionError as err:
+        print("Unable to contact consul service on " + str(CONFIG["consul"]) + ".\n" + str(err))
+        exit(1)
+
 
 def event_loop():
     global SELF_IP
@@ -65,14 +72,21 @@ def event_loop():
                     PAYLOAD["PORT_MAPPING"] = list()
                     if not PAYLOAD["IsService"]:
                         EXT_ATTRS = fetch_container_details(PAYLOAD["ID"]).attrs
-                        print(EXT_ATTRS["NetworkSettings"]["Ports"])
+                        if "consul" in EXT_ATTRS["Config"]["Labels"]:
+                            if str(EXT_ATTRS["Config"]["Labels"]["consul"]).lower() == "yes":
+                                PAYLOAD["labels"] = EXT_ATTRS["Config"]["Labels"]
+                            else:
+                                print("Service '" + PAYLOAD["Service"] + "' is not marked to register in consul. Ignoring.")
+                                continue
+                        else:
+                            print("Service '" + PAYLOAD["Service"] + "' is not marked to register in consul. Ignoring.")
+                            continue
                         for mapsrc,mapdst in EXT_ATTRS["NetworkSettings"]["Ports"].items():
                             PROTOCOL = "TCP"
                             if "udp" in mapsrc:
                                 PROTOCOL = "UDP"
                             if mapdst[0]["HostIp"] != "0.0.0.0":
                                 IP = mapdst[0]["HostIp"]
-                                print(IP)
                             else:
                                 IP = SELF_IP
                             PAYLOAD["PORT_MAPPING"].append(dict({"PROTOCOL":PROTOCOL,"IP":IP,"Port":mapdst[0]["HostPort"]}))
@@ -80,29 +94,23 @@ def event_loop():
                         # this is a service
                         # get port mapping info from service definition
                         ATTRS = fetch_service_details(PAYLOAD["ServiceID"]).attrs
-                        for mapping in ATTRS["Endpoint"]["Ports"]:
-                            PAYLOAD["PORT_MAPPING"].append(dict({"PROTOCOL":str(mapping["Protocol"]),"IP":SELF_IP,"Port":mapping["PublishedPort"]}))
+                        if "consul" in ATTRS["Spec"]["Labels"]:
+                            if str(ATTRS["Spec"]["Labels"]["consul"]).lower() == "yes":
+                                PAYLOAD["labels"] = ATTRS["Spec"]["Labels"]
+                                for mapping in ATTRS["Endpoint"]["Ports"]:
+                                    PAYLOAD["PORT_MAPPING"].append(dict({"PROTOCOL":str(mapping["Protocol"]),"IP":SELF_IP,"Port":mapping["PublishedPort"]}))
+                            else:
+                                print("Service '" + PAYLOAD["Service"] + "' is not marked to register in consul. Ignoring.")
+                                continue
+                        else:
+                            print("Service '" + PAYLOAD["Service"] + "' is not marked to register in consul. Ignoring.")
+                            continue    
                     notify_consul(PAYLOAD)
                 else:
                     PAYLOAD["CMD"] = "deregister"
                     if PAYLOAD["IsService"]:
                         PAYLOAD["ID"]
                     notify_consul(PAYLOAD)
-
-def fetch_container_details(id):
-    return DOCKER_CLIENT.containers.get(id)
-
-def fetch_service_details(id):
-    return DOCKER_CLIENT.services.get(service_id=id)
-
-def check_consul_connection():
-    try:
-        if requests.get(CONFIG["consul"],timeout=2).status_code != 200:
-            print("Unable to contact consul service on " + str(CONFIG["consul"]))
-            exit(1)
-    except requests.exceptions.ConnectionError as err:
-        print("Unable to contact consul service on " + str(CONFIG["consul"]) + ".\n" + str(err))
-        exit(1)
 
 def notify_consul(payload):
     if payload["CMD"] == "register":
@@ -134,12 +142,40 @@ def notify_consul(payload):
                     print("Successfully deregistered service with payload " + str(payload))
                     break
         else:
-            print("Unable to properly detect service instance in registered services.")
+            print("Unable to deregister. Consul is not aware of this service definition " + str(payload))
 
         # resp = requests.put(url=CONFIG["consul"] + "/v1/agent/service/" + payload["CMD"] + "/" + str(payload["ID"]),headers=headers)
         # if resp.status_code == 200:
         #     print("Successfully deregistered service with payload " + str(payload))
 
+
+
+def init():
+    global DOCKER_CLIENT
+    global CONFIG
+    global SELF_IP
+    try:
+        CONFIG = json.load(open(sys.argv[1]))
+        DOCKER_CLIENT = docker.DockerClient(base_url='unix:/' + str(CONFIG["docker"]))
+        SELF_IP = CONFIG["self_ip"]
+        check_consul_connection()
+        cleanup()
+        # for container in (DOCKER_CLIENT.containers.list(filters={"status":"running"})):
+        #     print(container.attrs["Id"])
+        
+        
+    except IndexError:
+        print("You need to provide a configuration file (config.json, typically) as an argument with this script. ")
+        exit(1)
+
+    except docker.errors.DockerException as dockererror:
+        print("Unable to connect to docker daemon. Reason: " + str(dockererror))
+        exit(1)
+    except KeyError as err:
+        print("Config parsing error. Key not found in config: " + str(err))
+        exit(1)
+
+    event_loop()
 
 
 
