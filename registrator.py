@@ -21,16 +21,38 @@ def is_ServiceContainer(container=None):
             return True
     return False
 
+def generate_Payload_For_Registration(container=None):
+    if not container:
+        return None
+    payload = dict()
+    payload["Check"] = dict()
+    payload["Check"]["DeregisterCriticalServiceAfter"] = "5s"
+    payload["Check"]["Interval"] = "2s"
+    payload["Check"]["Timeout"] = "3s"
+    payload["EnableTagOverride"] = False
+    payload["Connect"] = {"SidecarService":{}}
+
+
+    return payload
+
 def register_Service_To_Consul(container=None):
-    pass
+    data = generate_Payload_For_Registration(container=container)
+    if not data:
+        print("No proper container is passed to register")
+        return None
+    headers = {"Content-type": "application/json"}
+    resp = requests.put("http://127.0.0.1:8500/v1/agent/service/register",json=(data), headers=headers)
+    print(resp.content)
+
+
+    
 
 
 def cleanup():
     for container in DOCKER_CLIENT.containers.list():
         if is_ServiceContainer(container=container):
             svc_id = (fetch_container_details(id=container.attrs["Id"]).attrs["Config"]["Labels"]["com.docker.swarm.task.name"])
-            if (requests.get(CONFIG["consul"] + "/v1/agent/service/mysvc")):
-                register_Service_To_Consul(container)
+            register_Service_To_Consul(container)
         else:
             print(json.dumps(fetch_container_details(id=container.attrs["Id"]).attrs))
         
@@ -160,8 +182,9 @@ def notify_consul(payload):
                 data["Port"] = int(mapping["Port"])
                 data["Check"][mapping["PROTOCOL"]] = str(data["Address"] + ":" + str(data["Port"]))
                 resp = requests.put(url=CONFIG["consul"] + "/v1/agent/service/" + payload["CMD"],json=data,headers=headers)
+                print(json.dumps(data))
                 if resp.status_code == 200:
-                    print("Successfully registered service with payload: " + str(payload))
+                    print("Successfully registered service with payload: " + str(json.dumps(payload)))
                 else:
                     print("Unable to register service with payload " + str(data))
                     print(resp.reason)
@@ -172,7 +195,7 @@ def notify_consul(payload):
             if payload["ID"] in key:
                 resp = requests.put(url=CONFIG["consul"] + "/v1/agent/service/" + payload["CMD"] + "/" + str(key),headers=headers)
                 if resp.status_code == 200:
-                    print("Successfully deregistered service with payload " + str(payload))
+                    print("Successfully deregistered service with payload " + str(json.dumps(payload)))
                     break
         else:
             print("Unable to deregister. Consul is not aware of this service definition " + str(payload))
