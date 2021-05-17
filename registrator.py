@@ -15,7 +15,7 @@ DOCKER_CLIENT = None
 CONFIG = None
 SELF_IP = None
 
-def is_ServiceContainer(container=None):
+def is_A_Service_Container(container=None):
     if "Labels" in container.attrs["Config"]:
         if "com.docker.swarm.service.id" in container.attrs["Config"]["Labels"]:
             return True
@@ -38,24 +38,14 @@ def generate_Payload_For_Registration(container=None):
 def register_Service_To_Consul(container=None):
     data = generate_Payload_For_Registration(container=container)
     if not data:
-        print("No proper container is passed to register")
+        print("No proper container is passed to register. Skipping...")
         return None
     headers = {"Content-type": "application/json"}
     resp = requests.put("http://127.0.0.1:8500/v1/agent/service/register",json=(data), headers=headers)
     print(resp.content)
 
-
-    
-
-
-def cleanup():
-    for container in DOCKER_CLIENT.containers.list():
-        if is_ServiceContainer(container=container):
-            svc_id = (fetch_container_details(id=container.attrs["Id"]).attrs["Config"]["Labels"]["com.docker.swarm.task.name"])
-            register_Service_To_Consul(container)
-        else:
-            print(json.dumps(fetch_container_details(id=container.attrs["Id"]).attrs))
-        
+def get_Container_Attribs(container):
+    return DOCKER_CLIENT.containers.get(container.id)
 
 
 def get_Registered_Services_From_Consul(service=None):
@@ -67,6 +57,29 @@ def get_Registered_Services_From_Consul(service=None):
     if resp.status_code==404:
         return 404
     return resp.json()
+
+
+def is_Container_Registered_To_Consul(container=None):
+    # payload = generate_Payload_For_Registration(container=container)
+    for servicename, servicedef in get_Registered_Services_From_Consul().items():
+        if "ingress-service" in servicename or "sidecar" in servicename.lower():
+            continue
+        if container.name == servicedef["ID"]:
+            return True
+    return False
+
+
+def cleanup():
+    print("Running initial cleanup.")
+    print("Checking with running containers first.")
+    for container in DOCKER_CLIENT.containers.list():
+        if not is_Container_Registered_To_Consul(container=container):
+            print("Registering dangling container " + str(container.id) + " with consul.")
+            register_Service_To_Consul(container)
+        else:
+            print("Container " + str(container.id) + " is already registered to consul.")
+    print("Initial cleanup complete.")
+        
 
 def fetch_container_details(id):
     return DOCKER_CLIENT.containers.get(id)
@@ -177,7 +190,8 @@ def notify_consul(payload):
         data["EnableTagOverride"] = payload["EnableTagOverride"]
         if "PORT_MAPPING" in payload:
             for mapping in payload["PORT_MAPPING"]:
-                data["ID"] = payload["ID"] + "_" + str(mapping["PROTOCOL"]) + "_" + str(mapping["Port"])
+                # data["ID"] = payload["ID"] + "_" + str(mapping["PROTOCOL"]) + "_" + str(mapping["Port"])
+                data["ID"] = payload["ID"]
                 data["Address"] = mapping["IP"]
                 data["Port"] = int(mapping["Port"])
                 data["Check"][mapping["PROTOCOL"]] = str(data["Address"] + ":" + str(data["Port"]))
