@@ -15,6 +15,17 @@ DOCKER_CLIENT = None
 CONFIG = None
 SELF_IP = None
 
+
+
+def fetch_container_details(id):
+    return DOCKER_CLIENT.containers.get(id)
+
+def fetch_service_details(id):
+    return DOCKER_CLIENT.services.get(service_id=id)
+
+def get_Service_Container_Details(container):
+    return DOCKER_CLIENT.services.get(service_id=container.attrs["Config"]["Labels"]["com.docker.swarm.service.id"])
+
 def is_A_Service_Container(container=None):
     if "Labels" in container.attrs["Config"]:
         if "com.docker.swarm.service.id" in container.attrs["Config"]["Labels"]:
@@ -31,14 +42,27 @@ def generate_Payload_For_Registration(container=None):
     payload["Check"]["Timeout"] = "3s"
     payload["EnableTagOverride"] = False
     payload["Connect"] = {"SidecarService":{}}
+    payload["ID"] = container.id
+    if is_A_Service_Container(container=container):
+        svc = get_Service_Container_Details(container=container).attrs
+        payload["Name"] = svc["Spec"]["Name"]
+        payload["Meta"] = svc["Spec"]["Labels"]
+        if "consul" not in payload["Meta"]:
+            return None
+    else:
+        print("Regular container")
+        payload["Name"] = container.name
+        payload["Meta"] = container.attrs["Config"]["Labels"]
+        if "consul" not in payload["Meta"]:
+            return None
 
-
+    print(json.dumps(payload))
     return payload
 
 def register_Service_To_Consul(container=None):
     data = generate_Payload_For_Registration(container=container)
     if not data:
-        print("No proper container is passed to register. Skipping...")
+        print("Container " + str(container.id) + " is not labelled to register. Skipping.")
         return None
     headers = {"Content-type": "application/json"}
     resp = requests.put("http://127.0.0.1:8500/v1/agent/service/register",json=(data), headers=headers)
@@ -64,6 +88,8 @@ def is_Container_Registered_To_Consul(container=None):
     for servicename, servicedef in get_Registered_Services_From_Consul().items():
         if "ingress-service" in servicename or "sidecar" in servicename.lower():
             continue
+
+        # need to change this container.name to container.id check with servicedef["ID"] to keep things consistent
         if container.name == servicedef["ID"]:
             return True
     return False
@@ -74,18 +100,12 @@ def cleanup():
     print("Checking with running containers first.")
     for container in DOCKER_CLIENT.containers.list():
         if not is_Container_Registered_To_Consul(container=container):
-            print("Registering dangling container " + str(container.id) + " with consul.")
+            print("Registering dangling container '" + str(container.id) + "' with consul.")
             register_Service_To_Consul(container)
         else:
-            print("Container " + str(container.id) + " is already registered to consul.")
+            print("Container '" + str(container.id) + "' is already registered to consul. Skipping.")
     print("Initial cleanup complete.")
         
-
-def fetch_container_details(id):
-    return DOCKER_CLIENT.containers.get(id)
-
-def fetch_service_details(id):
-    return DOCKER_CLIENT.services.get(service_id=id)
 
 def check_consul_connection():
     try:
