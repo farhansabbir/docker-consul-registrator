@@ -1,23 +1,39 @@
 #!/bin/env python3
-import os
-import sys
-import json
-import docker
-import requests
-import datetime
-import platform
+try:
+    import os
+    import sys
+    import json
+    import docker
+    import requests
+    import datetime
+    import platform
+except ModuleNotFoundError as err:
+    print("Unable to load module. " + str(err) + ". Please activate/create virtualenv first.")
+    exit(1)
 
 DOCKER_CLIENT = None
 CONFIG = None
 SELF_IP = None
 
+def is_ServiceContainer(container=None):
+    if "Labels" in container.attrs["Config"]:
+        if "com.docker.swarm.service.id" in container.attrs["Config"]["Labels"]:
+            return True
+    return False
+
+def register_Service_To_Consul(container=None):
+    pass
+
+
 def cleanup():
-    my_services = get_Registered_Services_From_Consul()
-    for service in my_services.keys():
-        if "sidecar-proxy" in service or "ingress-service" in service:
-            continue
-        print(get_Registered_Services_From_Consul(service=service))
-        #print(fetch_container_details(id=my_services["ID"]))
+    for container in DOCKER_CLIENT.containers.list():
+        if is_ServiceContainer(container=container):
+            svc_id = (fetch_container_details(id=container.attrs["Id"]).attrs["Config"]["Labels"]["com.docker.swarm.task.name"])
+            if (requests.get(CONFIG["consul"] + "/v1/agent/service/mysvc")):
+                register_Service_To_Consul(container)
+        else:
+            print(json.dumps(fetch_container_details(id=container.attrs["Id"]).attrs))
+        
 
 
 def get_Registered_Services_From_Consul(service=None):
@@ -26,6 +42,8 @@ def get_Registered_Services_From_Consul(service=None):
         resp = requests.get(CONFIG["consul"] + "/v1/agent/services")
     else:
         resp = requests.get(CONFIG["consul"] + "/v1/agent/service/"+service)
+    if resp.status_code==404:
+        return 404
     return resp.json()
 
 def fetch_container_details(id):
@@ -174,7 +192,7 @@ def init():
         DOCKER_CLIENT = docker.DockerClient(base_url='unix:/' + str(CONFIG["docker"]))
         SELF_IP = CONFIG["self_ip"]
         check_consul_connection()
-        cleanup()
+        
         # for container in (DOCKER_CLIENT.containers.list(filters={"status":"running"})):
         #     print(container.attrs["Id"])
         
@@ -190,6 +208,7 @@ def init():
         print("Config parsing error. Key not found in config: " + str(err))
         exit(1)
 
+    cleanup()
     event_loop()
 
 
