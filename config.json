@@ -2,5 +2,6 @@
     "consul":"http://127.0.0.1:8500",
     "docker": "/var/run/docker.sock",
     "self_ip":"192.168.88.246",
-    "consul_registration_label":"register"
+    "consul_registration_label":"consul",
+    "sidecar_enable": 0
 }

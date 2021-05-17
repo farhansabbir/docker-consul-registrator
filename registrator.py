@@ -1,11 +1,9 @@
 #!/bin/env python3
 try:
-    import os
     import sys
     import json
     import docker
     import requests
-    import datetime
     import platform
 except ModuleNotFoundError as err:
     print("Unable to load module. " + str(err) + ". Please activate/create virtualenv first.")
@@ -36,37 +34,68 @@ def generate_Payload_For_Registration(container=None):
     if not container:
         return None
     payload = dict()
+    payload["Tags"] = list()
+    payload["Tags"].append(container.attrs["Config"]["Image"])
     payload["Check"] = dict()
     payload["Check"]["DeregisterCriticalServiceAfter"] = "5s"
     payload["Check"]["Interval"] = "2s"
     payload["Check"]["Timeout"] = "3s"
     payload["EnableTagOverride"] = False
-    payload["Connect"] = {"SidecarService":{}}
+    if CONFIG["sidecar_enable"] == 1:
+        payload["Connect"] = {"SidecarService":{}}
     payload["ID"] = container.id
     if is_A_Service_Container(container=container):
+        print("Service container: " + str(container.id))
         svc = get_Service_Container_Details(container=container).attrs
         payload["Name"] = svc["Spec"]["Name"]
         payload["Meta"] = svc["Spec"]["Labels"]
-        if "consul" not in payload["Meta"]:
+        payload["Tags"].append(str(payload["Meta"]))
+        if CONFIG["consul_registration_label"] not in payload["Meta"]:
             return None
+        
     else:
-        print("Regular container")
+        print("Regular container: " + str(container.id))
         payload["Name"] = container.name
         payload["Meta"] = container.attrs["Config"]["Labels"]
-        if "consul" not in payload["Meta"]:
+        payload["Tags"].append(str(payload["Meta"]))
+        payload["Tags"].append(container.attrs["Config"]["Image"] + "@" + container.attrs["Image"])
+        if CONFIG["consul_registration_label"] not in payload["Meta"]:
             return None
+        for portproto,mapping in container.attrs["NetworkSettings"]["Ports"].items():
+            if "tcp" in portproto:
+                for hpmap in mapping:
+                    if hpmap["HostIp"] == "0.0.0.0":
+                        payload["Check"]["tcp"] = CONFIG["self_ip"] + ":" + hpmap["HostPort"]
+                        payload["Address"] = CONFIG["self_ip"]
+                    elif hpmap["HostIp"] == "::":
+                        continue
+                    else:
+                        payload["Check"]["tcp"] = hpmap["HostIp"] + ":" + hpmap["HostPort"]
+                        payload["Address"] = hpmap["HostIp"]
+            elif "udp" in portproto:
+                if mapping["HostIp"] == "0.0.0.0":
+                    payload["Check"]["udp"] = CONFIG["self_ip"] + ":" + mapping["HostPort"]
+                elif mapping["HostIp"] == "::":
+                    continue
+                else:
+                    payload["Check"]["udp"] = mapping["HostIp"] + ":" + mapping["HostPort"]
+        
 
-    print(json.dumps(payload))
+    #print(json.dumps(payload))
     return payload
 
 def register_Service_To_Consul(container=None):
     data = generate_Payload_For_Registration(container=container)
     if not data:
-        print("Container " + str(container.id) + " is not labelled to register. Skipping.")
+        print("Container '" + str(container.name) + " (" + str(container.id) + ")' is not labelled to register. Skipping.")
         return None
     headers = {"Content-type": "application/json"}
-    resp = requests.put("http://127.0.0.1:8500/v1/agent/service/register",json=(data), headers=headers)
-    print(resp.content)
+    resp = requests.put("http://127.0.0.1:8500/v1/agent/service/register",json=data, headers=headers)
+    if resp.status_code == 200:
+        print("Successfully registered container (" + str(container.name) + " (" + str(container.id) + ")' to consul.")
+    else:
+        print("Unable to register container '" + str(container.name) + " (" + str(container.id) + ")' to consul.")
+        print(resp.text)
 
 def get_Container_Attribs(container):
     return DOCKER_CLIENT.containers.get(container.id)
@@ -100,10 +129,10 @@ def cleanup():
     print("Checking with running containers first.")
     for container in DOCKER_CLIENT.containers.list():
         if not is_Container_Registered_To_Consul(container=container):
-            print("Registering dangling container '" + str(container.id) + "' with consul.")
+            print("Registering dangling container '" + str(container.name) + " (" + str(container.id) + ")' with consul.")
             register_Service_To_Consul(container)
         else:
-            print("Container '" + str(container.id) + "' is already registered to consul. Skipping.")
+            print("Container '" + str(container.name) + " (" + str(container.id) + ")' is already registered to consul. Skipping.")
     print("Initial cleanup complete.")
         
 
