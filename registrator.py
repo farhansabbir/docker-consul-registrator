@@ -145,7 +145,7 @@ def get_Container_List_From_Host(status="running"):
 
 
 def cleanup():
-    print("Running initial cleanup.")
+    print("Running cleanup.")
     print("Validating with running containers first.")
     for container in DOCKER_CLIENT.containers.list():
         if not is_Container_Registered_To_Consul(container=container):
@@ -188,9 +188,11 @@ def event_loop():
         if (event["Type"]=="container"):
             if event["status"] == "start":
                 if not (is_Container_Registered_To_Consul(fetch_container_details(event["id"]))):
+                    cleanup()
                     register_Service_To_Consul(fetch_container_details(event["id"]))
             if event["status"] == "destroy":
                 deregister_Service_From_Consul(event["id"])
+                cleanup()
 
 
 
