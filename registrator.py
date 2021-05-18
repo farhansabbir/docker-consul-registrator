@@ -64,7 +64,7 @@ def generate_Payload_For_Registration(container=None):
             print("WARNING! Multiple port bindings found. Using single exposed port only. This may impact service registration.")
         payload["Check"][svc["Endpoint"]["Ports"][0]["Protocol"]] = CONFIG["self_ip"] + ":" + str(svc["Endpoint"]["Ports"][0]["PublishedPort"])
         payload["Address"] = CONFIG["self_ip"]
-        payload["Port"] = svc["Endpoint"]["Ports"][0]["PublishedPort"]
+        payload["Port"] = int(svc["Endpoint"]["Ports"][0]["PublishedPort"])
     else:
         # print("Regular container: " + str(container.id))
         payload["Name"] = container.name
@@ -80,7 +80,7 @@ def generate_Payload_For_Registration(container=None):
             if mapping[0]["HostIp"] != "":
                 IP = mapping[0]["HostIp"]
             payload["Check"][portproto[portproto.index("/")+1:]] = str(IP) + ":" + str(mapping[0]["HostPort"])
-            payload["Port"] = str(mapping[0]["HostPort"])
+            payload["Port"] = int(mapping[0]["HostPort"])
             payload["Address"] = str(IP)
     return payload
 
