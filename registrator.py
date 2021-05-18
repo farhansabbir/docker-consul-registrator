@@ -56,40 +56,30 @@ def generate_Payload_For_Registration(container=None):
             payload["Check"][portmapping["Protocol"]] = CONFIG["self_ip"] + ":" + str(portmapping["PublishedPort"])
     else:
         # print("Regular container: " + str(container.id))
-        print(json.dumps(container.attrs))
         payload["Name"] = container.name
         payload["Meta"] = container.attrs["Config"]["Labels"]
         payload["Tags"].append(str(payload["Meta"]))
         payload["Tags"].append(container.attrs["Config"]["Image"] + "@" + container.attrs["Image"])
         if CONFIG["consul_registration_label"] not in payload["Meta"]:
             return None
-        for portproto,mapping in container.attrs["NetworkSettings"]["Ports"].items():
-            if "tcp" in portproto:
-                if len(mapping) >= 2:
-                    print("WARNING: Multiple port mappings found. We will select the valid last one.")
-                for hpmap in mapping:
-                    if hpmap["HostIp"] == "0.0.0.0":
-                        payload["Check"]["tcp"] = CONFIG["self_ip"] + ":" + hpmap["HostPort"]
-                        payload["Address"] = CONFIG["self_ip"]
-                    elif hpmap["HostIp"] == "::":
-                        continue
-                    else:
-                        payload["Check"]["tcp"] = hpmap["HostIp"] + ":" + hpmap["HostPort"]
-                        payload["Address"] = hpmap["HostIp"]
-            elif "udp" in portproto:
-                if len(mapping) >= 2:
-                    print("WARNING: Multiple port mappings found. We will select the valid last one.")
-                for hpmap in mapping:
-                    if hpmap["HostIp"] == "0.0.0.0":
-                        payload["Check"]["udp"] = CONFIG["self_ip"] + ":" + hpmap["HostPort"]
-                        payload["Address"] = CONFIG["self_ip"]
-                    elif hpmap["HostIp"] == "::":
-                        continue
-                    else:
-                        payload["Check"]["tcp"] = hpmap["HostIp"] + ":" + hpmap["HostPort"]
-                        payload["Address"] = hpmap["HostIp"]
-    print(payload)
+        for portproto,mapping in container.attrs["HostConfig"]["PortBindings"].items():
+            # print(portproto[portproto.index("/")+1:])
+            if len(mapping) > 1:
+                print("Warning! Multiple ports exposed. Will select only first one: " + str(mapping[0]))
+            IP = CONFIG["self_ip"]
+            if mapping[0]["HostIp"] != "":
+                IP = mapping[0]["HostIp"]
+            payload["Check"][portproto[portproto.index("/")+1:]] = str(IP) + ":" + str(mapping[0]["HostPort"])
     return payload
+
+def deregister_Service_From_Consul(id=None):
+    headers = {"Content-type": "application/json"}
+    resp = requests.put("http://127.0.0.1:8500/v1/agent/service/deregister/"+id, headers=headers)
+    if resp.status_code == 200:
+        print("Successfully deregistered container " + id +  " from consul.")
+    else:
+        print("Unable to deregister container " + id +  " from consul because " + str(resp.text))
+
 
 def register_Service_To_Consul(container=None):
     data = generate_Payload_For_Registration(container=container)
@@ -124,22 +114,38 @@ def is_Container_Registered_To_Consul(container=None):
     for servicename, servicedef in get_Registered_Services_From_Consul().items():
         if "ingress-service" in servicename or "sidecar" in servicename.lower():
             continue
-
-        # need to change this container.name to container.id check with servicedef["ID"] to keep things consistent
         if container.id == servicedef["ID"]:
             return True
     return False
 
+def get_Container_List_From_Host(status="running"):
+    return (DOCKER_CLIENT.containers.list(filters={"status":status}))
 
 def cleanup():
     print("Running initial cleanup.")
-    print("Checking with running containers first.")
+    print("Validating with running containers first.")
     for container in DOCKER_CLIENT.containers.list():
         if not is_Container_Registered_To_Consul(container=container):
-            #print("Registering dangling container '" + str(container.name) + " (" + str(container.id) + ")' with consul.")
             register_Service_To_Consul(container)
         else:
             print("Container '" + str(container.name) + " (" + str(container.id) + ")' is already registered to consul. Skipping.")
+    print("Cleaning up old stale/exited containers. Found total: " + str(len(get_Container_List_From_Host(status="exited"))))
+    for container in get_Container_List_From_Host(status="exited"):
+        if is_Container_Registered_To_Consul(container=container):
+            print("Container is still registered with consul. Deregistering.")
+            deregister_Service_From_Consul(container.id)
+        else:
+            print("Please remove old container " + container.id + " from system.")
+            # container.remove()
+    print("Cleaning up for registered containers from consul that don't exist in system anymore.")
+
+    for svc_id in (get_Registered_Services_From_Consul()).keys():
+        if svc_id in ["ingress-service","sidecar"]:
+            continue
+        if (svc_id not in [container.id for container in get_Container_List_From_Host()]):
+            print("Deregistering non-existant container '" + svc_id + "' from consul")
+            deregister_Service_From_Consul(svc_id)
+
     print("Initial cleanup complete.")
         
 
@@ -157,122 +163,11 @@ def event_loop():
     global SELF_IP
     for event in DOCKER_CLIENT.events(decode=True):
         if (event["Type"]=="container"):
-            if event["status"] == "start" or event["status"] == "destroy":
-                PAYLOAD = dict()
-                PAYLOAD["ID"] = event["id"] # container ID
-                PAYLOAD["Address"] = CONFIG["self_ip"]
-                PAYLOAD["Check"] = dict()
-                PAYLOAD["Check"]["DeregisterCriticalServiceAfter"] = "5s"
-                PAYLOAD["Check"]["Interval"] = "2s"
-                PAYLOAD["Check"]["Timeout"] = "3s"
-                PAYLOAD["Tags"] = list()
-                PAYLOAD["EnableTagOverride"] = False
-                PAYLOAD["Node"] = platform.node()
-                if "Attributes" in event["Actor"]:
-                    ATTRS = event["Actor"]["Attributes"]
-                    PAYLOAD["Service"] = ATTRS["name"]
-                    PAYLOAD["IsService"] = False
-                    if "com.docker.swarm.service.id" in ATTRS:
-                        PAYLOAD["ID"] = ATTRS["name"]
-                        PAYLOAD["IsService"] = True
-                        PAYLOAD["ServiceID"] = ATTRS["com.docker.swarm.service.id"]
-                        PAYLOAD["Service"] = ATTRS["com.docker.swarm.service.name"]
-                    PAYLOAD["CONTAINER_NAME"] = ATTRS["name"]
-                    PAYLOAD["Tags"].append(ATTRS["image"])
-                    #PAYLOAD["IMAGE_NAME"] = ATTRS["image"]
-                if event["status"] == "start":
-                    PAYLOAD["CMD"] = "register"
-                    PAYLOAD["PORT_MAPPING"] = list()
-                    if not PAYLOAD["IsService"]:
-                        EXT_ATTRS = fetch_container_details(PAYLOAD["ID"]).attrs
-                        if "sidecar" in EXT_ATTRS["Config"]["Labels"]:
-                            if str(EXT_ATTRS["Config"]["Labels"]["sidecar"]) != "": 
-                                PAYLOAD["sidecar"] = str(EXT_ATTRS["Config"]["Labels"]["sidecar"])
-                        if "consul" in EXT_ATTRS["Config"]["Labels"]:
-                            if str(EXT_ATTRS["Config"]["Labels"]["consul"]).lower() == "yes":
-                                PAYLOAD["labels"] = EXT_ATTRS["Config"]["Labels"]
-                            else:
-                                print("Service '" + PAYLOAD["Service"] + "' is not marked to register in consul. Ignoring.")
-                                continue
-                        else:
-                            print("Service '" + PAYLOAD["Service"] + "' is not marked to register in consul. Ignoring.")
-                            continue
-                        for mapsrc,mapdst in EXT_ATTRS["NetworkSettings"]["Ports"].items():
-                            PROTOCOL = "TCP"
-                            if "udp" in mapsrc:
-                                PROTOCOL = "UDP"
-                            if mapdst[0]["HostIp"] != "0.0.0.0":
-                                IP = mapdst[0]["HostIp"]
-                            else:
-                                IP = SELF_IP
-                            PAYLOAD["PORT_MAPPING"].append(dict({"PROTOCOL":PROTOCOL,"IP":IP,"Port":mapdst[0]["HostPort"]}))
-                    else:
-                        # this is a service
-                        # get port mapping info from service definition
-                        ATTRS = fetch_service_details(PAYLOAD["ServiceID"]).attrs
-                        if "sidecar" in ATTRS["Spec"]["Labels"]:
-                            if str(ATTRS["Spec"]["Labels"]["sidecar"]) != "":
-                                PAYLOAD["sidecar"] = ATTRS["Spec"]["Labels"]["sidecar"]
-
-                        if "consul" in ATTRS["Spec"]["Labels"]:
-                            if str(ATTRS["Spec"]["Labels"]["consul"]).lower() == "yes":
-                                PAYLOAD["labels"] = ATTRS["Spec"]["Labels"]
-                                for mapping in ATTRS["Endpoint"]["Ports"]:
-                                    PAYLOAD["PORT_MAPPING"].append(dict({"PROTOCOL":str(mapping["Protocol"]),"IP":SELF_IP,"Port":mapping["PublishedPort"]}))
-                            else:
-                                print("Service '" + PAYLOAD["Service"] + "' is not marked to register in consul. Ignoring.")
-                                continue
-                        else:
-                            print("Service '" + PAYLOAD["Service"] + "' is not marked to register in consul. Ignoring.")
-                            continue    
-                    notify_consul(PAYLOAD)
-                else:
-                    PAYLOAD["CMD"] = "deregister"
-                    if PAYLOAD["IsService"]:
-                        PAYLOAD["ID"]
-                    notify_consul(PAYLOAD)
-
-def notify_consul(payload):
-    if payload["CMD"] == "register":
-        headers = {"Content-type": "application/json"}
-        data = dict()
-        data["Check"] = payload["Check"]
-        data["Tags"] = payload["Tags"]
-        data["Name"] = payload["Service"]
-        data["Meta"] = dict()
-        if "labels" in payload:
-            for key,value in payload["labels"].items():
-                data["Meta"][key] = value
-        data["EnableTagOverride"] = payload["EnableTagOverride"]
-        if "PORT_MAPPING" in payload:
-            for mapping in payload["PORT_MAPPING"]:
-                # data["ID"] = payload["ID"] + "_" + str(mapping["PROTOCOL"]) + "_" + str(mapping["Port"])
-                data["ID"] = payload["ID"]
-                data["Address"] = mapping["IP"]
-                data["Port"] = int(mapping["Port"])
-                data["Check"][mapping["PROTOCOL"]] = str(data["Address"] + ":" + str(data["Port"]))
-                resp = requests.put(url=CONFIG["consul"] + "/v1/agent/service/" + payload["CMD"],json=data,headers=headers)
-                print(json.dumps(data))
-                if resp.status_code == 200:
-                    print("Successfully registered service with payload: " + str(json.dumps(payload)))
-                else:
-                    print("Unable to register service with payload " + str(data))
-                    print(resp.reason)
-    elif payload["CMD"] == "deregister":
-        headers = {"Content-type": "application/json"}
-        resp = requests.get(url=CONFIG["consul"] + "/v1/agent/services",headers=headers).json()
-        for key in resp.keys():
-            if payload["ID"] in key:
-                resp = requests.put(url=CONFIG["consul"] + "/v1/agent/service/" + payload["CMD"] + "/" + str(key),headers=headers)
-                if resp.status_code == 200:
-                    print("Successfully deregistered service with payload " + str(json.dumps(payload)))
-                    break
-        else:
-            print("Unable to deregister. Consul is not aware of this service definition " + str(payload))
-
-        # resp = requests.put(url=CONFIG["consul"] + "/v1/agent/service/" + payload["CMD"] + "/" + str(payload["ID"]),headers=headers)
-        # if resp.status_code == 200:
-        #     print("Successfully deregistered service with payload " + str(payload))
+            if event["status"] == "start":
+                if not (is_Container_Registered_To_Consul(fetch_container_details(event["id"]))):
+                    register_Service_To_Consul(fetch_container_details(event["id"]))
+            if event["status"] == "destroy":
+                deregister_Service_From_Consul(event["id"])
 
 
 
