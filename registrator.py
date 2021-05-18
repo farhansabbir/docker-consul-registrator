@@ -60,8 +60,11 @@ def generate_Payload_For_Registration(container=None):
         payload["Tags"].append(str(payload["Meta"]))
         if CONFIG["consul_registration_label"] not in payload["Meta"]:
             return None
-        for portmapping in svc["Endpoint"]["Ports"]:
-            payload["Check"][portmapping["Protocol"]] = CONFIG["self_ip"] + ":" + str(portmapping["PublishedPort"])
+        if len(svc["Endpoint"]["Ports"]) > 1:
+            print("WARNING! Multiple port bindings found. Using single exposed port only. This may impact service registration.")
+        payload["Check"][svc["Endpoint"]["Ports"][0]["Protocol"]] = CONFIG["self_ip"] + ":" + str(svc["Endpoint"]["Ports"][0]["PublishedPort"])
+        payload["Address"] = CONFIG["self_ip"]
+        payload["Port"] = svc["Endpoint"]["Ports"][0]["PublishedPort"]
     else:
         # print("Regular container: " + str(container.id))
         payload["Name"] = container.name
@@ -71,13 +74,14 @@ def generate_Payload_For_Registration(container=None):
         if CONFIG["consul_registration_label"] not in payload["Meta"]:
             return None
         for portproto,mapping in container.attrs["HostConfig"]["PortBindings"].items():
-            # print(portproto[portproto.index("/")+1:])
             if len(mapping) > 1:
                 print("Warning! Multiple ports exposed. Will select only first one: " + str(mapping[0]))
             IP = CONFIG["self_ip"]
             if mapping[0]["HostIp"] != "":
                 IP = mapping[0]["HostIp"]
             payload["Check"][portproto[portproto.index("/")+1:]] = str(IP) + ":" + str(mapping[0]["HostPort"])
+            payload["Port"] = str(mapping[0]["HostPort"])
+            payload["Address"] = str(IP)
     return payload
 
 
