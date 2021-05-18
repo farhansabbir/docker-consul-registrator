@@ -18,17 +18,25 @@ SELF_IP = None
 def fetch_container_details(id):
     return DOCKER_CLIENT.containers.get(id)
 
+
+
 def fetch_service_details(id):
     return DOCKER_CLIENT.services.get(service_id=id)
 
+
+
 def get_Service_Container_Details(container):
     return DOCKER_CLIENT.services.get(service_id=container.attrs["Config"]["Labels"]["com.docker.swarm.service.id"])
+
+
 
 def is_A_Service_Container(container=None):
     if "Labels" in container.attrs["Config"]:
         if "com.docker.swarm.service.id" in container.attrs["Config"]["Labels"]:
             return True
     return False
+
+
 
 def generate_Payload_For_Registration(container=None):
     if not container:
@@ -72,13 +80,16 @@ def generate_Payload_For_Registration(container=None):
             payload["Check"][portproto[portproto.index("/")+1:]] = str(IP) + ":" + str(mapping[0]["HostPort"])
     return payload
 
+
+
 def deregister_Service_From_Consul(id=None):
     headers = {"Content-type": "application/json"}
-    resp = requests.put("http://127.0.0.1:8500/v1/agent/service/deregister/"+id, headers=headers)
+    resp = requests.put(CONFIG["consul"] + "/v1/agent/service/deregister/" + id, headers=headers)
     if resp.status_code == 200:
         print("Successfully deregistered container " + id +  " from consul.")
     else:
         print("Unable to deregister container " + id +  " from consul because " + str(resp.text))
+
 
 
 def register_Service_To_Consul(container=None):
@@ -87,15 +98,18 @@ def register_Service_To_Consul(container=None):
         print("Container '" + str(container.name) + " (" + str(container.id) + ")' is not labelled to register with consul. Skipping.")
         return None
     headers = {"Content-type": "application/json"}
-    resp = requests.put("http://127.0.0.1:8500/v1/agent/service/register",json=data, headers=headers)
+    resp = requests.put(CONFIG["consul"] + "/v1/agent/service/register",json=data, headers=headers)
     if resp.status_code == 200:
         print("Successfully registered container (" + str(container.name) + " (" + str(container.id) + ")' to consul.")
     else:
         print("Unable to register container '" + str(container.name) + " (" + str(container.id) + ")' to consul.")
         print(resp.text)
 
+
+
 def get_Container_Attribs(container):
     return DOCKER_CLIENT.containers.get(container.id)
+
 
 
 def get_Registered_Services_From_Consul(service=None):
@@ -109,6 +123,7 @@ def get_Registered_Services_From_Consul(service=None):
     return resp.json()
 
 
+
 def is_Container_Registered_To_Consul(container=None):
     # payload = generate_Payload_For_Registration(container=container)
     for servicename, servicedef in get_Registered_Services_From_Consul().items():
@@ -118,8 +133,12 @@ def is_Container_Registered_To_Consul(container=None):
             return True
     return False
 
+
+
 def get_Container_List_From_Host(status="running"):
     return (DOCKER_CLIENT.containers.list(filters={"status":status}))
+
+
 
 def cleanup():
     print("Running initial cleanup.")
@@ -180,11 +199,7 @@ def init():
         DOCKER_CLIENT = docker.DockerClient(base_url='unix:/' + str(CONFIG["docker"]))
         SELF_IP = CONFIG["self_ip"]
         check_consul_connection()
-        
-        # for container in (DOCKER_CLIENT.containers.list(filters={"status":"running"})):
-        #     print(container.attrs["Id"])
-        
-        
+
     except IndexError:
         print("You need to provide a configuration file (config.json, typically) as an argument with this script. ")
         exit(1)
