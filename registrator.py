@@ -45,16 +45,18 @@ def generate_Payload_For_Registration(container=None):
         payload["Connect"] = {"SidecarService":{}}
     payload["ID"] = container.id
     if is_A_Service_Container(container=container):
-        print("Service container: " + str(container.id))
+        # print("Service container: " + str(container.id))
         svc = get_Service_Container_Details(container=container).attrs
         payload["Name"] = svc["Spec"]["Name"]
         payload["Meta"] = svc["Spec"]["Labels"]
         payload["Tags"].append(str(payload["Meta"]))
         if CONFIG["consul_registration_label"] not in payload["Meta"]:
             return None
-        
+        for portmapping in svc["Endpoint"]["Ports"]:
+            payload["Check"][portmapping["Protocol"]] = CONFIG["self_ip"] + ":" + str(portmapping["PublishedPort"])
     else:
-        print("Regular container: " + str(container.id))
+        # print("Regular container: " + str(container.id))
+        print(json.dumps(container.attrs))
         payload["Name"] = container.name
         payload["Meta"] = container.attrs["Config"]["Labels"]
         payload["Tags"].append(str(payload["Meta"]))
@@ -63,6 +65,8 @@ def generate_Payload_For_Registration(container=None):
             return None
         for portproto,mapping in container.attrs["NetworkSettings"]["Ports"].items():
             if "tcp" in portproto:
+                if len(mapping) >= 2:
+                    print("WARNING: Multiple port mappings found. We will select the valid last one.")
                 for hpmap in mapping:
                     if hpmap["HostIp"] == "0.0.0.0":
                         payload["Check"]["tcp"] = CONFIG["self_ip"] + ":" + hpmap["HostPort"]
@@ -73,21 +77,24 @@ def generate_Payload_For_Registration(container=None):
                         payload["Check"]["tcp"] = hpmap["HostIp"] + ":" + hpmap["HostPort"]
                         payload["Address"] = hpmap["HostIp"]
             elif "udp" in portproto:
-                if mapping["HostIp"] == "0.0.0.0":
-                    payload["Check"]["udp"] = CONFIG["self_ip"] + ":" + mapping["HostPort"]
-                elif mapping["HostIp"] == "::":
-                    continue
-                else:
-                    payload["Check"]["udp"] = mapping["HostIp"] + ":" + mapping["HostPort"]
-        
-
-    #print(json.dumps(payload))
+                if len(mapping) >= 2:
+                    print("WARNING: Multiple port mappings found. We will select the valid last one.")
+                for hpmap in mapping:
+                    if hpmap["HostIp"] == "0.0.0.0":
+                        payload["Check"]["udp"] = CONFIG["self_ip"] + ":" + hpmap["HostPort"]
+                        payload["Address"] = CONFIG["self_ip"]
+                    elif hpmap["HostIp"] == "::":
+                        continue
+                    else:
+                        payload["Check"]["tcp"] = hpmap["HostIp"] + ":" + hpmap["HostPort"]
+                        payload["Address"] = hpmap["HostIp"]
+    print(payload)
     return payload
 
 def register_Service_To_Consul(container=None):
     data = generate_Payload_For_Registration(container=container)
     if not data:
-        print("Container '" + str(container.name) + " (" + str(container.id) + ")' is not labelled to register. Skipping.")
+        print("Container '" + str(container.name) + " (" + str(container.id) + ")' is not labelled to register with consul. Skipping.")
         return None
     headers = {"Content-type": "application/json"}
     resp = requests.put("http://127.0.0.1:8500/v1/agent/service/register",json=data, headers=headers)
@@ -119,7 +126,7 @@ def is_Container_Registered_To_Consul(container=None):
             continue
 
         # need to change this container.name to container.id check with servicedef["ID"] to keep things consistent
-        if container.name == servicedef["ID"]:
+        if container.id == servicedef["ID"]:
             return True
     return False
 
@@ -129,7 +136,7 @@ def cleanup():
     print("Checking with running containers first.")
     for container in DOCKER_CLIENT.containers.list():
         if not is_Container_Registered_To_Consul(container=container):
-            print("Registering dangling container '" + str(container.name) + " (" + str(container.id) + ")' with consul.")
+            #print("Registering dangling container '" + str(container.name) + " (" + str(container.id) + ")' with consul.")
             register_Service_To_Consul(container)
         else:
             print("Container '" + str(container.name) + " (" + str(container.id) + ")' is already registered to consul. Skipping.")
