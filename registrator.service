@@ -11,6 +11,7 @@ Group=root
 Environment=PYTHONPATH="/opt/docker_consul_registrator/venv/lib/python3.9/site-packages/:$PYTHONPATH"
 ExecStart=/opt/docker_consul_registrator/venv/bin/python3 /opt/docker_consul_registrator/registrator.py /etc/docker_consul_registrator/config.json
 ExecReload=/bin/kill --signal HUP $MAINPID
+ExecStartPost=/opt/docker_consul_registrator/venv/bin/python3 /opt/docker_consul_registrator/atha.py /etc/docker_consul_registrator/config.json
 KillMode=process
 KillSignal=SIGTERM
 Restart=on-failure
