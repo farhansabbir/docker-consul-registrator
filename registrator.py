@@ -5,7 +5,6 @@ try:
     import docker
     import syslog
     import requests
-    import platform
 except ModuleNotFoundError as err:
     print("Unable to load module. " + str(err) + ". Please activate/create virtualenv first.")
     exit(1)
