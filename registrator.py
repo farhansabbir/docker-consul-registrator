@@ -158,7 +158,7 @@ def cleanup():
             syslog.syslog(syslog.LOG_INFO,"Container is still registered with consul. Deregistering.")
             deregister_Service_From_Consul(container.id)
         else:
-            syslog.syslog(syslog.LOG_INFO,"Please remove old container " + container.id + " from system.")
+            syslog.syslog(syslog.LOG_WARNING,"Please remove old container " + container.id + " from system.")
             # container.remove()
     syslog.syslog(syslog.LOG_INFO,"Cleaning up for registered containers from consul that don't exist in system anymore.")
 
@@ -175,10 +175,10 @@ def cleanup():
 def check_consul_connection():
     try:
         if requests.get(CONFIG["consul"],timeout=2).status_code != 200:
-            syslog.syslog(syslog.LOG_INFO,"Unable to contact consul service on " + str(CONFIG["consul"]))
+            syslog.syslog(syslog.LOG_ERR,"Unable to contact consul service on " + str(CONFIG["consul"]))
             exit(1)
     except requests.exceptions.ConnectionError as err:
-        syslog.syslog(syslog.LOG_INFO,"Unable to contact consul service on " + str(CONFIG["consul"]) + ".\n" + str(err))
+        syslog.syslog(syslog.LOG_ERR,"Unable to contact consul service on " + str(CONFIG["consul"]) + ".\n" + str(err))
         exit(1)
 
 
@@ -207,14 +207,14 @@ def init():
         check_consul_connection()
 
     except IndexError:
-        syslog.syslog(syslog.LOG_INFO,"You need to provide a configuration file (config.json, typically) as an argument with this script. ")
+        syslog.syslog(syslog.LOG_ERR,"You need to provide a configuration file (config.json, typically) as an argument with this script. ")
         exit(1)
 
     except docker.errors.DockerException as dockererror:
-        syslog.syslog(syslog.LOG_INFO,"Unable to connect to docker daemon. Reason: " + str(dockererror))
+        syslog.syslog(syslog.LOG_ERR,"Unable to connect to docker daemon. Reason: " + str(dockererror))
         exit(1)
     except KeyError as err:
-        syslog.syslog(syslog.LOG_INFO,"Config parsing error. Key not found in config: " + str(err))
+        syslog.syslog(syslog.LOG_ERR,"Config parsing error. Key not found in config: " + str(err))
         exit(1)
 
     cleanup()
